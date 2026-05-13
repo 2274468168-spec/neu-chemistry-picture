@@ -1,0 +1,155 @@
+import torch
+import matplotlib.pyplot as plt
+
+# ================= 基础设置 =================
+plt.rcParams['font.sans-serif'] = ['SimHei']        # 中文字体
+plt.rcParams['axes.unicode_minus'] = False          # 负号正常显示
+R = 8.314                                           # 理想气体常数 J/(mol·K)
+
+# 母液浓度 (请根据你的实验指导书核对)
+C0_Fe = 0.04       # Fe(NO3)3 母液浓度 (mol/L)
+C0_KI = 0.04       # KI 母液浓度 (mol/L)
+C0_Na2S2O3 = 0.004  # Na2S2O3 母液浓度 (mol/L)
+V_Na2S2O3 = 2.00   # Na2S2O3 每次加入体积 (mL)
+V_total = 20.0     # 混合后总体积 (mL)
+
+# ================= 1. 实验原始数据 =================
+# 测定 a 1-5
+V_Fe_tensor = torch.tensor([2.00, 3.00, 4.00, 5.00, 6.00], dtype=torch.float32)
+t_Fe_tensor = torch.tensor([1151,773,573,443,354], dtype=torch.float32)
+
+# 测定 b  1 6 7 8
+V_KI_tensor = torch.tensor([2.00, 2.50, 3.00, 4.00], dtype=torch.float32)
+t_KI_tensor = torch.tensor([1151,690,523,370], dtype=torch.float32)
+
+# 测定活化能 1 9 10
+T_Ea_tensor = torch.tensor([294,307.5,317.3], dtype=torch.float32)  # K
+t_Ea_tensor = torch.tensor([1151,370,193], dtype=torch.float32)            # s
+
+# ================= 2. 工具函数 =================
+# 线性回归（返回斜率、截距、R²）
+def linear_regression_torch(x, y):
+    x_mean = torch.mean(x)
+    y_mean = torch.mean(y)
+    slope = torch.sum((x - x_mean) * (y - y_mean)) / torch.sum((x - x_mean) ** 2)
+    intercept = y_mean - slope * x_mean
+    y_pred = slope * x + intercept
+    ss_res = torch.sum((y - y_pred) ** 2)
+    ss_tot = torch.sum((y - y_mean) ** 2)
+    r_squared = 1 - (ss_res / ss_tot)
+    return slope.item(), intercept.item(), r_squared.item()
+
+# 标准四舍五入（避免 Python 默认的银行家舍入）
+def round_half_up(x):
+    return int(x + 0.5) if x >= 0 else int(x - 0.5)
+
+# ================= 3. 数据处理与反应级数 =================
+delta_c_S2O3 = (V_Na2S2O3 * C0_Na2S2O3) / V_total  # 每次消耗的 Na2S2O3 折算浓度变化
+
+# --- 计算 a (Fe3+) ---
+c_Fe_init = (V_Fe_tensor * C0_Fe) / V_total
+v0_Fe = delta_c_S2O3 / t_Fe_tensor / 2
+lg_c_Fe = torch.log10(c_Fe_init)
+lg_v0_Fe = torch.log10(v0_Fe)
+slope_a, intercept_a, r2_a = linear_regression_torch(lg_c_Fe, lg_v0_Fe)
+
+# --- 计算 b (I-) ---
+c_KI_init = (V_KI_tensor * C0_KI) / V_total
+v0_KI = delta_c_S2O3 / t_KI_tensor / 2
+lg_c_KI = torch.log10(c_KI_init)
+lg_v0_KI = torch.log10(v0_KI)
+slope_b, intercept_b, r2_b = linear_regression_torch(lg_c_KI, lg_v0_KI)
+
+# 打印精确值
+print(f"相对于 Fe3+ 的反应级数 a (精确值): {slope_a:.4f}, R²: {r2_a:.4f}")
+print(f"相对于 I- 的反应级数 b (精确值): {slope_b:.4f}, R²: {r2_b:.4f}")
+
+# 约化到整数（仅用于显示方程）
+a_rounded = round_half_up(slope_a)
+b_rounded = round_half_up(slope_b)
+print(f"\n第 4 题: 约化后的速率方程式: v = k * [Fe3+]^{a_rounded} * [I-]^{b_rounded}")
+
+# ================= 4. 活化能 Ea 计算（使用非整数级数） =================
+# 实验(1),(9),(10) 的初始浓度（均与实验1相同）
+c_Fe_Ea = (2.00 * C0_Fe) / V_total
+c_KI_Ea = (2.00 * C0_KI) / V_total
+v0_Ea = delta_c_S2O3 / t_Ea_tensor
+
+# 关键改变：用原始拟合值 slope_a 和 slope_b 计算 k，而不是 a_rounded, b_rounded
+k_tensor = v0_Ea / ((c_Fe_Ea ** slope_a) * (c_KI_Ea ** slope_b))
+
+print(f"\n第 5 题: 三个温度下的速率常数 k (基于非整数级数):")
+print(f"k1 (T={T_Ea_tensor[0].item():.2f} K): {k_tensor[0].item():.4e}")
+print(f"k2 (T={T_Ea_tensor[1].item():.2f} K): {k_tensor[1].item():.4e}")
+print(f"k3 (T={T_Ea_tensor[2].item():.2f} K): {k_tensor[2].item():.4e}")
+
+# 阿伦尼乌斯拟合：ln(k) = -Ea/(R·T) + ln(A)
+x_arrhenius = 1.0 / T_Ea_tensor
+y_arrhenius = torch.log(k_tensor)
+slope_Ea, intercept_Ea, r2_Ea = linear_regression_torch(x_arrhenius, y_arrhenius)
+
+Ea_joules = -slope_Ea * R
+Ea_kJ = Ea_joules / 1000
+
+print(f"由 ln(k) 对 1/T 线性拟合得到的斜率: {slope_Ea:.4f}, R²: {r2_Ea:.4f}")
+print(f"计算得出的反应活化能 Ea = {Ea_kJ:.2f} kJ/mol")
+
+# ================= 5. 绘制图形 =================
+fig = plt.figure(figsize=(14, 10))
+
+# 图1: lg(v0) - lg(c(Fe3+))
+ax1 = plt.subplot(2, 2, 1)
+ax1.scatter(lg_c_Fe.numpy(), lg_v0_Fe.numpy(), color='#1f77b4', s=80, label='实验点')
+x1_line = torch.linspace(lg_c_Fe.min(), lg_c_Fe.max(), 50)
+y1_line = slope_a * x1_line + intercept_a
+ax1.plot(x1_line.numpy(), y1_line.numpy(), color='#d62728',
+         label=f'拟合线 (a={slope_a:.3f})')
+ax1.set_xlabel(r'$\lg\ c(\mathrm{Fe}^{3+})_0$')
+ax1.set_ylabel(r'$\lg\ v_0$')
+ax1.set_title(r'图1：$\lg v_0$ - $\lg c(\mathrm{Fe}^{3+})_0$')
+ax1.legend()
+ax1.grid(True, linestyle='--', alpha=0.6)
+
+# 图2: lg(v0) - lg(c(I-))
+ax2 = plt.subplot(2, 2, 2)
+ax2.scatter(lg_c_KI.numpy(), lg_v0_KI.numpy(), color='#2ca02c', marker='s', s=80, label='实验点')
+x2_line = torch.linspace(lg_c_KI.min(), lg_c_KI.max(), 50)
+y2_line = slope_b * x2_line + intercept_b
+ax2.plot(x2_line.numpy(), y2_line.numpy(), color='#ff7f0e',
+         label=f'拟合线 (b={slope_b:.3f})')
+ax2.set_xlabel(r'$\lg\ c(\mathrm{I}^-)_0$')
+ax2.set_ylabel(r'$\lg\ v_0$')
+ax2.set_title(r'图2：$\lg v_0$ - $\lg c(\mathrm{I}^-)_0$')
+ax2.legend()
+ax2.grid(True, linestyle='--', alpha=0.6)
+
+#图3: 阿伦尼乌斯图 ln(k) - 1/T
+ax3 = plt.subplot(2, 2, 3)
+ax3.scatter(x_arrhenius.numpy(), y_arrhenius.numpy(), color='#9467bd', s=80, label='实验点')
+x3_line = torch.linspace(x_arrhenius.min(), x_arrhenius.max(), 50)
+y3_line = slope_Ea * x3_line + intercept_Ea
+ax3.plot(x3_line.numpy(), y3_line.numpy(), color='#8c564b',
+         label=f'拟合线 (Ea={Ea_kJ:.1f} kJ/mol)')
+ax3.set_xlabel(r'$1/T\ (\mathrm{K}^{-1})$')
+ax3.set_ylabel(r'$\ln\ k$')
+ax3.set_title('图3：阿伦尼乌斯图')
+ax3.legend()
+ax3.grid(True, linestyle='--', alpha=0.6)
+
+# 图4: 数据汇总表
+ax4 = plt.subplot(2, 2, 4)
+ax4.axis('off')
+table_text = [
+    [r'$T$ / K', f'{T_Ea_tensor[0].item():.2f}', f'{T_Ea_tensor[1].item():.2f}', f'{T_Ea_tensor[2].item():.2f}'],
+    [r'$t$ / s', f'{t_Ea_tensor[0].item():.0f}', f'{t_Ea_tensor[1].item():.0f}', f'{t_Ea_tensor[2].item():.0f}'],
+    [r'$k$', f'{k_tensor[0].item():.4e}', f'{k_tensor[1].item():.4e}', f'{k_tensor[2].item():.4e}']
+]
+table = ax4.table(cellText=table_text, loc='center', cellLoc='center')
+table.auto_set_font_size(False)
+table.set_fontsize(11)
+table.scale(1.5, 1.5)
+ax4.text(0.5, -0.1, f'Ea = {Ea_kJ:.2f} kJ/mol', transform=ax4.transAxes,
+         ha='center', fontsize=12, fontweight='bold')
+
+plt.tight_layout()
+plt.show()

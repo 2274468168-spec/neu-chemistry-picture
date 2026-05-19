@@ -1,0 +1,55 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import linregress
+
+# 1. 准备数据
+V_HNO3 = np.array([5.00, 10.00, 15.00, 20.00, 25.00])
+pH = np.array([5.78, 5.40, 5.15, 4.96, 4.80])
+V_NaAc = 50.0
+
+# 2. 计算横坐标 X = lg(50/V - 1)
+X = np.log10(V_NaAc / V_HNO3 - 1.0)
+
+# 3. 线性回归拟合
+slope, intercept, r_value, p_value, std_err = linregress(X, pH)
+r_squared = r_value**2 # 计算 R 的平方
+
+# 4. 绘图设置
+plt.rcParams['font.sans-serif'] = ['SimHei'] # 支持中文显示
+plt.rcParams['axes.unicode_minus'] = False
+
+plt.figure(figsize=(8, 6))
+
+# 绘制实验数据散点
+plt.scatter(X, pH, color='red', marker='o', s=50, label='实验数据点')
+
+# 绘制拟合直线 (在这里把 R² 加进 label 里了)
+X_fit = np.linspace(min(X)-0.1, max(X)+0.1, 100)
+Y_fit = slope * X_fit + intercept
+plt.plot(X_fit, Y_fit, color='blue', linestyle='-',
+         label=f'拟合直线: y = {slope:.3f}x + {intercept:.3f}\n$R^2$ = {r_squared:.4f}')
+
+# 图形修饰
+plt.title('pH 法测定 HAc 的电离常数', fontsize=16)
+plt.xlabel('$\lg([NaAc]/[HNO_3] - 1)$', fontsize=14)
+plt.ylabel('平均 $pH$ 值', fontsize=14)
+
+# 标记截距
+plt.axhline(y=intercept, color='gray', linestyle='--', alpha=0.7)
+plt.axvline(x=0, color='gray', linestyle='--', alpha=0.7)
+plt.text(0.05, intercept + 0.05, f'截距 pKa = {intercept:.3f}', fontsize=12, color='darkgreen')
+
+# 如果你想把 R² 单独写在图表的某个空白位置，可以取消下面这行的注释：
+# plt.text(min(X), max(pH) - 0.2, f'$R^2$ = {r_squared:.4f}', fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
+
+plt.legend(fontsize=12)
+plt.grid(True, linestyle=':', alpha=0.6)
+
+# 显示图像
+plt.tight_layout()
+plt.show()
+
+# 打印拟合结果供参考填写
+print(f"拟合方程: Y = {slope:.4f} * X + {intercept:.4f}")
+print(f"截距 (pKa 实验值): {intercept:.4f}")
+print(f"R 平方值: {r_squared:.4f} (越接近1说明线性越好)")
